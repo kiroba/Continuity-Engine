@@ -1,0 +1,5 @@
+# Password Reset Tokens Storage
+Time-limited reset challenges
+Cryptographic proof of private key access
+Challenge-response verification records
+Auto-expired after 1 hour
