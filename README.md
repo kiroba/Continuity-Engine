@@ -1,2 +1,2 @@
 # Continuity-Engine
-This Engine creates webpage-based profiles for use with social media websites across the Continuum.
+this is the backbone of the Continuum Application. this creates profiles from different sources depending on the user data input and configures it for use in the Continuum Application.
