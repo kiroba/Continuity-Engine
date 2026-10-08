@@ -165,5 +165,5 @@ if __name__ == "__main__":
     print(f"[✓] Matched Friends Count: {match_res['matched_fan_count']}")
     print(f"[✓] Milestone Progress: {match_res['milestone_progress']['percentage_complete']}% toward 500-fan floor")
     print("=========================================================================")
-    print("🎉 ALL TESTS PASSED 100%!")
+    print("ALL TESTS PASSED 100%!")
     print("=========================================================================\n")
