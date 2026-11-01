@@ -114,6 +114,33 @@ class CanonicalFormatTest(unittest.TestCase):
             self.engine.import_external_profile("X", "@a", "b", [], prev_hash="not-a-hash")
 
 
+class DaemonLimitsTest(unittest.TestCase):
+    """Payloads stay inside what Omni-Daemon v8.23.0 accepts on /api/profile/social-import."""
+
+    def setUp(self):
+        self.engine = ed.ContinuitySocialImportEngine()
+
+    def test_text_is_trimmed_and_control_chars_dropped(self):
+        ev = self.engine.import_external_profile(" x_twitter ", " @alice\t", " line1\nline2\x00 ",
+                                                 [{"name": " Bob\x07 ", "email": "b@x.io"}])
+        p = ev["payload"]
+        self.assertEqual((p["platform_source"], p["external_handle"], p["imported_bio"]),
+                         ("X_TWITTER", "@alice", "line1\nline2"))
+        self.assertEqual(p["contact_blind_hashes"][0]["display_name"], "Bob")
+        self.assertEqual(p["contact_blind_hashes"][0]["platform"], "x_twitter")
+        self.assertTrue(ed.verify_event(ev))
+
+    def test_limits_raise_before_signing(self):
+        many = [{"email": f"u{i}@x.io"} for i in range(ed.MAX_CONTACTS + 1)]
+        for args in (("X", "@a", "b", many), ("X", "@a", "b" * (ed.MAX_BIO_CHARS + 1), []),
+                     ("X", "", "b", []), ("P" * 33, "@a", "b", [])):
+            with self.assertRaises(ValueError):
+                self.engine.import_external_profile(*args)
+        long_name = self.engine.import_external_profile("X", "@a", "", [{"name": "n" * 200, "phone": "1"}])
+        self.assertEqual(len(long_name["payload"]["contact_blind_hashes"][0]["display_name"]),
+                         ed.MAX_DISPLAY_NAME_CHARS)
+
+
 class KeyFileTest(unittest.TestCase):
     def test_key_file_is_persistent_raw_and_private(self):
         with tempfile.TemporaryDirectory() as d:
