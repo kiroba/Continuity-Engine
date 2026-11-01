@@ -110,6 +110,43 @@ def _normalise_prev_hash(prev_hash: str) -> str:
         raise ValueError("previous_hash must be 0x + 64 hex (the author's previous event id, or 0x00..00)")
     return h
 
+# --- Limits the daemon enforces on PROFILE_SOCIAL_IMPORT (Omni-Daemon v8.23.0, /api/profile/social-import) --
+DAEMON_IMPORT_PATH = "/api/profile/social-import"
+MAX_CONTACTS = 500
+MAX_PLATFORM_CHARS = 32
+MAX_HANDLE_CHARS = 100
+MAX_BIO_CHARS = 1000
+MAX_DISPLAY_NAME_CHARS = 64
+
+
+def _clean(value, multiline: bool = False) -> str:
+    """Drop control characters (newlines kept in multiline text) and trim, as the daemon requires."""
+    v = "" if value is None else str(value)
+    return "".join(ch for ch in v if ch >= " " or (multiline and ch == "\n")).strip()
+
+
+def post_to_daemon(event: Dict[str, Any], base_url: str = "http://127.0.0.1:5000",
+                   token: Optional[str] = None, timeout: float = 15.0) -> Tuple[int, Dict[str, Any]]:
+    """POST a signed import event to an Omni-Daemon hub (v8.23.0+). Returns (http_status, json_body).
+    token: the hub's local token (loopback) or remote-hub bearer token, sent as Authorization: Bearer."""
+    import urllib.error
+    import urllib.request
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(base_url.rstrip("/") + DAEMON_IMPORT_PATH, method="POST", headers=headers,
+                                 data=json.dumps(event).encode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        body = e.read()
+        try:
+            return e.code, json.loads(body or b"{}")
+        except ValueError:
+            return e.code, {"status": "ERROR", "message": body.decode("utf-8", "replace")}
+
+
 class ContinuitySocialImportEngine:
     """
     Handles porting external social media profiles and contact lists into
@@ -153,6 +190,15 @@ class ContinuitySocialImportEngine:
         {"event_id", "action", "author_pubkey", "previous_hash", "ts", "payload", "signature"}.
         """
         event_id = str(uuid.uuid4())
+        platform_name = _clean(platform_name)
+        external_handle = _clean(external_handle)
+        bio = _clean(bio, multiline=True)
+        if not platform_name or len(platform_name) > MAX_PLATFORM_CHARS:
+            raise ValueError(f"platform_name must be 1-{MAX_PLATFORM_CHARS} characters")
+        if not external_handle or len(external_handle) > MAX_HANDLE_CHARS:
+            raise ValueError(f"external_handle must be 1-{MAX_HANDLE_CHARS} characters")
+        if len(bio) > MAX_BIO_CHARS:
+            raise ValueError(f"bio is longer than {MAX_BIO_CHARS} characters")
 
         # Process and blind-hash contacts for privacy-preserving discovery
         hashed_contacts = []
@@ -161,10 +207,12 @@ class ContinuitySocialImportEngine:
             if raw_id:
                 contact_hash = self.hash_contact_identifier(raw_id)
                 hashed_contacts.append({
-                    "display_name": contact.get("name", "Omni Friend"),
+                    "display_name": _clean(contact.get("name", "Omni Friend"))[:MAX_DISPLAY_NAME_CHARS].strip(),
                     "blind_hash": contact_hash,
                     "platform": platform_name
                 })
+        if len(hashed_contacts) > MAX_CONTACTS:
+            raise ValueError(f"at most {MAX_CONTACTS} contacts per import event; split the import")
 
         payload = {
             "import_event_id": event_id,
